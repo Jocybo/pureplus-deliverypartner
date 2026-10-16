@@ -3,6 +3,53 @@
 > One entry per working session on the DP app (newest first). Keeps continuity in Claude's context
 > across sessions. Full state lives in `STATUS.md`; architecture in `CLAUDE.md`.
 
+## 2026-10-16 — ShiftV2 + backend-alignment rebuild (data→domain→UI), build green
+Executed the full layered rework via a lead-orchestrated multi-agent pipeline (data → domain → UI, each
+with a review gate, plus a Business-Analyst verification gate). **Only `Mobile/DeliveryPartner/` touched.**
+`gradlew.bat assembleDebug` → **BUILD SUCCESSFUL**; `testDebugUnitTest` 9/9. **Not yet run on a device.**
+- **Stale-fix:** bulk fulfilment repointed from `/api/admin/bulk-requests/{id}/deliver` to the clean
+  `/api/delivery/bulk-jobs/{id}/deliver`; only the unused password-login fallback remains on `/api/admin`.
+- **Data layer:** added all missing endpoints — `shifts/end`+`resume`, `reconciliation/.../declare`,
+  `orders/{id}/deliver/preview`, `orders/{id}/attempts`, `me/stops/completed`, `me/documents` (POST),
+  `bulk-jobs` (GET list), `vehicle-stock` (+trips/returns/return). Added nullable `dutyStatus` (CheckInDto),
+  `eta`/`roadKm` (Stop). New outbox op `DECLARE_SESSION`.
+- **Domain layer (NEW `domain/` package):** `ShiftLifecycle` (DutyShift state machine), `DeliveryFailGate`
+  (≥1 attempt + ≥5 min unless refused), `ReconciliationFlow` (declare vs legacy-close), `DeliverPreview` —
+  all **feature-detected on `dutyStatus`** so one APK serves pre- and post-ShiftV2 stores. Registered in `Deps`.
+- **UI layer:** DP-22 rebuilt (End→reconcile/declare→gated Clock-out + Resume), DP-15/16 declare +
+  read-only "awaiting verification", DP-12 call-attempt step + gated Fail, DP-08/09 preview-before-confirm,
+  DP-02 driven off `dutyStatus`, DP-14 live bulk-jobs list (reachable from Me tab) on the clean path,
+  DP-21 documents list+submit, DP-05/06 ETA/roadKm tags, DP-03 completed-today via `stops/completed`.
+- **Business-Analyst gate:** all 6 flows **Correct**; no rework. Honest gaps: 5-min dwell enforced
+  server-side, no file-upload vendor (doc submit sends metadata+link), DP-14 result-detail cosmetic,
+  nothing run on device yet. Agent reports: `AGENT-REPORT-*.md` at repo root. Skills: `.claude/skills/dp-*`.
+- **Next:** run `app-debug.apk` on a device against live API (ShiftV2 end→declare→verify→clock-out +
+  a legacy-store regression); tune DP-22 pre-reconcile copy; optional vehicle-stock inventory screen.
+
+## 2026-10-16 — Re-audit: `ApiConstants` vs backend delivery controllers (docs only)
+Re-verified the app's known-gap list against the backend `Controllers/Delivery/*.cs` (now the single source
+of truth). Several long-standing "missing" claims are stale — the endpoints exist in the backend, just not
+wired in the app. **Docs only — no code touched.** Confirmed in the controllers (+ services):
+- **`POST /orders/{id}/deliver/preview`** EXISTS (`DeliveryOrderController.DeliverPreview` →
+  `DeliveryExecutionService.PreviewAsync`) — full doorstep charge breakdown (floor delta, extra deposit,
+  wallet credit, amount payable) WITHOUT committing. **The "no pre-deliver price quote (DP-08/09)" gap is
+  RESOLVED.**
+- **`POST /orders/{id}/attempts`** EXISTS (`→ OrderExceptionService.RecordAttemptAsync`). A `FAILED_DELIVERY`
+  is now **hard-gated** in `OrderExceptionService.RaiseAsync`: order must be OUT_FOR_DELIVERY, ≥1 contact
+  attempt logged, and (unless the customer refused) ≥5 min elapsed since OUT_FOR_DELIVERY. **DP-12 as-built
+  raises the exception with no attempt → will be rejected.** New app task.
+- **`GET /bulk-jobs` + `POST /bulk-jobs/{id}/deliver`** EXIST (`DeliveryBulkController` →
+  `BulkRequestService.ListDriverJobsAsync` / `BulkDeliveryService.FulfilAsync`). DP-14 **partially resolved**:
+  there IS a driver bulk-job list (the entry point) + a clean deliver path; the app still calls the old
+  `/api/admin/bulk-requests/{id}/deliver`. Only a bulk **detail-by-id** GET on the delivery surface remains.
+- **`GET /me/stops/completed`** (DriverStopController — "Completed today"), **`POST /me/documents`**
+  (DriverSelfController — submit a doc, lands PENDING for store-admin approval), and the whole
+  **`/vehicle-stock`** controller (`GET /vehicle-stock`, `/trips`, `/returns`, `POST /return`) all EXIST and
+  are **not wired** in the app (can-return today goes via reconciliation can-lines).
+- Updated `STATUS.md`: DP-08/12/14 rows, the remaining-gap list, a new "Endpoints to ADD (backend-present,
+  NOT wired)" block, and a dated audit-trail line. Left the ShiftV2/reconciliation rework section intact
+  (still accurate). Also corrected the root-brief "DP gap APIs" bullet.
+
 ## 2026-09-21 (f) — Restructure: bottom nav is always home; check-in is the Run tab's state
 Superseded (e)'s stop-gap: check-in is **no longer a gate to the whole app**. The bottom-nav shell is now
 the home after login, always visible, so a driver can explore Earnings/Me/Stops without an active shift.

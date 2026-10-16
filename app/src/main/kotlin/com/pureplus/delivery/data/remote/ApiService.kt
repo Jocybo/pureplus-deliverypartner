@@ -43,6 +43,14 @@ interface ApiService {
     @GET(ApiConstants.SHIFT_GEOFENCE)
     suspend fun geofence(): Response<ApiResponse<Geofence>>
 
+    // ShiftV2 (Phase 2 DutyShift): end = ACTIVE→PENDING_RECON (reversible); resume = PENDING_RECON→ACTIVE.
+    // Body is an optional { shiftDate } (reuses CheckOutRequest shape, lat/lng ignored); returns the shift row.
+    @POST(ApiConstants.SHIFT_END)
+    suspend fun endShift(@Body request: EndShiftRequest): Response<ApiResponse<CheckInDto>>
+
+    @POST(ApiConstants.SHIFT_RESUME)
+    suspend fun resumeShift(@Body request: EndShiftRequest): Response<ApiResponse<CheckInDto>>
+
     // ── DP-03 / DP-05 / DP-06 Route & stops ──────────────────────────────────
     @GET(ApiConstants.ME_ROUTE)
     suspend fun routeSummary(): Response<ApiResponse<RouteSummary>>
@@ -52,6 +60,10 @@ interface ApiService {
 
     @GET
     suspend fun stopDetail(@Url url: String): Response<ApiResponse<Stop>>
+
+    // Orders completed (delivered) today — the "Completed today" list on the stops page.
+    @GET(ApiConstants.ME_STOPS_COMPLETED)
+    suspend fun stopsCompleted(): Response<ApiResponse<List<Stop>>>
 
     // ── DP-07 live position ──────────────────────────────────────────────────
     @POST(ApiConstants.ME_LOCATION)
@@ -86,12 +98,25 @@ interface ApiService {
     @POST
     suspend fun closeSession(@Url url: String, @Body request: CloseSessionRequest): Response<ApiResponse<ReconciliationSession>>
 
+    // ShiftV2 (Phase 3): the driver's terminal declaration — OPEN→DRIVER_DECLARED (no body).
+    @POST
+    suspend fun declareSession(@Url url: String): Response<ApiResponse<ReconciliationSession>>
+
     // ── DP-08 / DP-10 / DP-11 / DP-12 order actions ──────────────────────────
     @POST
     suspend fun deliver(@Url url: String, @Body request: RecordDeliveryRequest): Response<ApiResponse<DeliveryExecutionResult>>
 
+    // DP-08 preview: the charge breakdown (floor + deposit + payable) for the given floor/empties, no commit.
+    // Same result shape as /deliver.
+    @POST
+    suspend fun deliverPreview(@Url url: String, @Body request: RecordDeliveryRequest): Response<ApiResponse<DeliveryExecutionResult>>
+
     @POST
     suspend fun confirmPayment(@Url url: String): Response<ApiResponse<DeliveryExecutionResult>>
+
+    // DP-12 contact attempt (fail-gate). Returns the new attempt id as a bare integer in the envelope.
+    @POST
+    suspend fun recordAttempt(@Url url: String, @Body request: RecordAttemptRequest): Response<ApiResponse<Int>>
 
     @POST
     suspend fun raiseException(@Url url: String, @Body request: RaiseExceptionRequest): Response<ApiResponse<OrderExceptionDto>>
@@ -103,8 +128,12 @@ interface ApiService {
     suspend fun orderStatus(@Url url: String): Response<ApiResponse<OrderStatus>>
 
     // ── DP-14 bulk fulfilment ────────────────────────────────────────────────
+    // List this driver's bulk jobs (default status OUT_FOR_DELIVERY).
+    @GET(ApiConstants.BULK_JOBS)
+    suspend fun bulkJobs(@Query("status") status: String?): Response<ApiResponse<List<BulkJob>>>
+
     @POST
-    suspend fun bulkDeliver(@Url url: String): Response<ApiResponse<Map<String, Any>>>
+    suspend fun bulkDeliver(@Url url: String): Response<ApiResponse<BulkDeliveryResult>>
 
     // ── DP-21 self-service ────────────────────────────────────────────────────
     @GET(ApiConstants.ME_PROFILE)
@@ -115,6 +144,10 @@ interface ApiService {
 
     @GET(ApiConstants.ME_DOCUMENTS)
     suspend fun documents(): Response<ApiResponse<List<DriverDocument>>>
+
+    // Submit a document (lands PENDING for Store-Admin approval) → returns the driver's FULL document list.
+    @POST(ApiConstants.ME_DOCUMENTS)
+    suspend fun submitDocument(@Body request: SubmitDocumentRequest): Response<ApiResponse<List<DriverDocument>>>
 
     @GET(ApiConstants.ME_SHIFT)
     suspend fun shiftInfo(): Response<ApiResponse<DriverShiftInfo>>
@@ -150,4 +183,24 @@ interface ApiService {
 
     @POST(ApiConstants.ME_NOTIFICATIONS_READ_ALL)
     suspend fun markAllNotificationsRead(): Response<ApiResponse<MarkedCountResult>>
+
+    // ── DP-03 / DP-04 / DP-15 vehicle stock ──────────────────────────────────────
+    @GET(ApiConstants.VEHICLE_STOCK)
+    suspend fun vehicleStock(): Response<ApiResponse<VehicleStock>>
+
+    @GET(ApiConstants.VEHICLE_STOCK_TRIPS)
+    suspend fun vehicleTrips(
+        @Query("from") from: String?,
+        @Query("to") to: String?,
+    ): Response<ApiResponse<List<VehicleTrip>>>
+
+    @GET(ApiConstants.VEHICLE_STOCK_RETURNS)
+    suspend fun vehicleReturns(
+        @Query("from") from: String?,
+        @Query("to") to: String?,
+    ): Response<ApiResponse<List<VehicleReturn>>>
+
+    // DP-15 return: undelivered fulls + collected empties back to store → the refreshed VehicleStock.
+    @POST(ApiConstants.VEHICLE_STOCK_RETURN)
+    suspend fun vehicleReturn(@Body request: VehicleReturnRequest): Response<ApiResponse<VehicleStock>>
 }

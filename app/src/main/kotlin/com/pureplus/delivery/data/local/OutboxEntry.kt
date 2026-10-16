@@ -8,7 +8,7 @@ import androidx.room.PrimaryKey
  * A WorkManager SyncWorker flushes these in creation-order when connectivity returns.
  *
  * Operations that are safe to enqueue here:
- *   DELIVER, CONFIRM_PAYMENT, EXCEPTION, CAN_LINES, CASH_TALLY, CLOSE_SESSION
+ *   DELIVER, CONFIRM_PAYMENT, EXCEPTION, CAN_LINES, CASH_TALLY, CLOSE_SESSION, DECLARE_SESSION
  *
  * The idempotencyKey on DELIVER/CONFIRM_PAYMENT prevents double-charges on retry.
  */
@@ -51,5 +51,6 @@ object OutboxOperation {
     const val EXCEPTION       = "EXCEPTION"
     const val CAN_LINES       = "CAN_LINES"
     const val CASH_TALLY      = "CASH_TALLY"
-    const val CLOSE_SESSION   = "CLOSE_SESSION"
+    const val CLOSE_SESSION   = "CLOSE_SESSION"   // legacy pre-ShiftV2 close
+    const val DECLARE_SESSION = "DECLARE_SESSION" // ShiftV2 terminal declaration (no body)
 }

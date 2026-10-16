@@ -1,6 +1,7 @@
 package com.pureplus.delivery.ui.self
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.pureplus.delivery.data.remote.DriverDocument
 import com.pureplus.delivery.data.remote.DriverShiftInfo
 import com.pureplus.delivery.ui.components.BottomNavBar
 import com.pureplus.delivery.ui.components.LabeledRow
@@ -40,6 +42,8 @@ import com.pureplus.delivery.ui.components.NavTab
 import com.pureplus.delivery.ui.components.OutlineButton
 import com.pureplus.delivery.ui.components.PpCard
 import com.pureplus.delivery.ui.components.SectionLabel
+import com.pureplus.delivery.ui.components.StatusChip
+import com.pureplus.delivery.ui.components.Tone
 import com.pureplus.delivery.ui.components.clickableNoRipple
 import com.pureplus.delivery.ui.theme.PpColor
 import com.pureplus.delivery.ui.theme.PpType
@@ -52,12 +56,14 @@ fun ProfileScreen(
     onOpenAttendance: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenNotifications: () -> Unit,
+    onOpenBulk: () -> Unit,
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val p = state.profile
     var editingContact by remember { mutableStateOf(false) }
+    var submittingDoc by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().background(PpColor.Canvas)) {
         Row(Modifier.fillMaxWidth().background(PpColor.Ink900).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -86,6 +92,8 @@ fun ProfileScreen(
                 LinkRow("Attendance", onOpenAttendance)
                 Divider()
                 LinkRow("Delivery history", onOpenHistory)
+                Divider()
+                LinkRow("Bulk / event jobs", onOpenBulk)
             }
 
             // Personal — contact is editable
@@ -161,6 +169,28 @@ fun ProfileScreen(
                 }
             }
 
+            // Documents — real list + a submit form (lands as PENDING for store-admin approval).
+            PpCard {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel("Documents")
+                    Text(
+                        "Submit",
+                        style = PpType.bodyStrong.copy(color = PpColor.Brand700),
+                        modifier = Modifier.clickableNoRipple { submittingDoc = true }.padding(4.dp),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                if (state.documents.isEmpty()) {
+                    Text("No documents submitted yet.", style = PpType.bodySm.copy(color = PpColor.Ink500))
+                } else {
+                    state.documents.forEach { d -> DocumentRow(d); Spacer(Modifier.height(8.dp)) }
+                }
+                state.docMessage?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, style = PpType.bodySm.copy(color = PpColor.Success))
+                }
+            }
+
             OutlineButton("Log out", onLogout, borderColor = PpColor.DangerBorder, contentColor = PpColor.Danger)
         }
 
@@ -175,7 +205,93 @@ fun ProfileScreen(
             onSave = { viewModel.updateContactNumber(it) { ok -> if (ok) editingContact = false } },
         )
     }
+
+    if (submittingDoc) {
+        SubmitDocumentDialog(
+            saving = state.submittingDoc,
+            onDismiss = { submittingDoc = false },
+            onSubmit = { type, number, url ->
+                viewModel.submitDocument(type, number, url, null, null) { ok -> if (ok) submittingDoc = false }
+            },
+        )
+    }
 }
+
+@Composable
+private fun DocumentRow(doc: DriverDocument) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(DOC_LABELS[doc.docType] ?: (doc.docType ?: "Document"), style = PpType.bodyStrong.copy(color = PpColor.Ink900))
+            doc.docNumber?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = PpType.monoSm.copy(color = PpColor.Ink500))
+            }
+        }
+        val tone = when (doc.status?.uppercase()) {
+            "APPROVED", "VERIFIED" -> Tone.Success
+            "REJECTED" -> Tone.Danger
+            else -> Tone.Pending
+        }
+        StatusChip(doc.status ?: "Pending", tone)
+    }
+}
+
+private val DOC_LABELS = mapOf(
+    "AADHAAR" to "Aadhaar",
+    "PAN" to "PAN",
+    "DRIVING_LICENCE" to "Driving licence",
+    "BANK_PASSBOOK" to "Bank passbook",
+    "VEHICLE_RC" to "Vehicle RC",
+    "VEHICLE_INSURANCE" to "Vehicle insurance",
+    "OTHER" to "Other",
+)
+
+@Composable
+private fun SubmitDocumentDialog(saving: Boolean, onDismiss: () -> Unit, onSubmit: (String, String, String) -> Unit) {
+    var type by remember { mutableStateOf("AADHAAR") }
+    var number by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text("Submit a document", style = PpType.cardTitle) },
+        text = {
+            Column {
+                Text("Type", style = PpType.label.copy(color = PpColor.Ink500))
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DOC_LABELS.forEach { (value, label) ->
+                        val selected = type == value
+                        Text(
+                            label,
+                            style = PpType.bodySm.copy(color = if (selected) PpColor.White else PpColor.Ink700),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (selected) PpColor.Ink900 else PpColor.Canvas)
+                                .clickableNoRipple { type = value }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = number, onValueChange = { number = it },
+                    singleLine = true, label = { Text("Document number") }, modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = url, onValueChange = { url = it },
+                    singleLine = true, label = { Text("File link (optional)") }, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(type, number, url) }, enabled = !saving) {
+                Text(if (saving) "Submitting…" else "Submit")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") } },
+    )
+}
+
 
 @Composable
 private fun EditContactDialog(current: String, saving: Boolean, onDismiss: () -> Unit, onSave: (String) -> Unit) {

@@ -47,7 +47,7 @@ object Routes {
     const val STOP_DETAIL = "stop_detail/{orderId}"
     const val DELIVER = "deliver/{orderId}"
     const val UNABLE = "unable/{orderId}"
-    const val BULK = "bulk/{bulkId}"
+    const val BULK = "bulk"
     const val CAN_RETURN = "can_return"
     const val CASH = "cash/{sessionId}"
     const val CHECK_OUT = "check_out/{sessionId}"
@@ -62,7 +62,6 @@ object Routes {
     fun stopDetail(orderId: Long) = "stop_detail/$orderId"
     fun deliver(orderId: Long) = "deliver/$orderId"
     fun unable(orderId: Long) = "unable/$orderId"
-    fun bulk(bulkId: Long) = "bulk/$bulkId"
     fun cash(sessionId: Long) = "cash/$sessionId"
     fun checkOut(sessionId: Long) = "check_out/$sessionId"
 
@@ -149,6 +148,7 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
                 onOpenAttendance = { navController.navigate(Routes.ATTENDANCE) },
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },
                 onOpenNotifications = { navController.navigate(Routes.NOTIFICATIONS) },
+                onOpenBulk = { navController.navigate(Routes.BULK) },
                 onLogout = { toLoggedOut() },
             )
         }
@@ -187,9 +187,8 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
                 onBack = { navController.popBackStack() },
             )
         }
-        composable(Routes.BULK, arguments = listOf(navArgument("bulkId") { type = NavType.LongType })) { entry ->
-            val bulkId = entry.arguments?.getLong("bulkId") ?: return@composable
-            BulkScreen(bulkRequestId = bulkId, onDone = { toStopsFresh() }, onBack = { navController.popBackStack() })
+        composable(Routes.BULK) {
+            BulkScreen(onBack = { navController.popBackStack() })
         }
 
         // ── Close out ────────────────────────────────────────────────────────

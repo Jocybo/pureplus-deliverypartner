@@ -104,6 +104,9 @@ private fun StopDetailBody(stop: Stop, context: android.content.Context) {
             Row(Modifier.fillMaxWidth().padding(top = 11.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 FloorLiftTag(stop.floorNo, stop.lift)
                 stop.landmark?.let { Tag(it) }
+                // Route-sequencing estimates (server-provided; "~" marks the ETA as approximate).
+                stop.eta?.takeIf { it.isNotBlank() }?.let { Tag("ETA ~$it") }
+                stop.roadKm?.let { Tag("${"%.1f".format(it)} km") }
             }
         }
 

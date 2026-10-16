@@ -21,10 +21,13 @@ data class RouteHomeState(
     val summary: RouteSummary? = null,
     val goal: GoalResponse? = null,
     val nextStop: Stop? = null,
+    /** Stops this driver has already delivered today (from GET /me/stops/completed). */
+    val completedToday: List<Stop> = emptyList(),
     val error: String? = null,
 ) {
+    // Prefer the authoritative completed-stops count when we have it, falling back to the summary.
+    val stopsDone: Int get() = if (completedToday.isNotEmpty()) completedToday.size else (summary?.stopsCompletedToday ?: 0)
     val stopsTotal: Int get() = (summary?.stopsPending ?: 0) + (summary?.stopsCompletedToday ?: 0)
-    val stopsDone: Int get() = summary?.stopsCompletedToday ?: 0
 }
 
 /** DP-03 · Today's route/home. Aggregates the shift dashboard, goal progress, and the next stop. */
@@ -46,6 +49,7 @@ class RouteHomeViewModel(private val driver: DriverRepository) : ViewModel() {
             val summary = driver.routeSummary()
             val goal = driver.goal()
             val stops = driver.stops()
+            val completed = driver.stopsCompleted()
             _state.update { s ->
                 s.copy(
                     loading = false,
@@ -54,6 +58,7 @@ class RouteHomeViewModel(private val driver: DriverRepository) : ViewModel() {
                     goal = (goal as? ApiResult.Success)?.data ?: s.goal,
                     nextStop = (stops as? ApiResult.Success)?.data
                         ?.firstOrNull { it.status != "DELIVERED" && it.status != "FAILED" },
+                    completedToday = (completed as? ApiResult.Success)?.data ?: s.completedToday,
                     error = (summary as? ApiResult.Failure)?.message,
                 )
             }

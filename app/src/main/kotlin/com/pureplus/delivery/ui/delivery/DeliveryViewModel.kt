@@ -13,6 +13,7 @@ import com.pureplus.delivery.data.repository.DeliverOutcome
 import com.pureplus.delivery.data.repository.DeliveryRepository
 import com.pureplus.delivery.data.repository.DriverRepository
 import com.pureplus.delivery.di.Deps
+import com.pureplus.delivery.domain.DeliverPreview
 import com.pureplus.delivery.ui.stops.isPostpaid
 import com.pureplus.delivery.util.isReusableProduct
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +35,7 @@ data class DoorLine(
     val shortfall: Int get() = if (reusable) (deliveredQty - emptiesCollected).coerceAtLeast(0) else 0
 }
 
-enum class DeliveryStep { Execution, Payment, Done }
+enum class DeliveryStep { Execution, Payment, Preview, Done }
 
 data class DeliveryState(
     val loading: Boolean = true,
@@ -45,6 +46,9 @@ data class DeliveryState(
     val paymentMode: String = "CASH",     // CASH | UPI (POSTPAID auto for subscription/B2B)
     val step: DeliveryStep = DeliveryStep.Execution,
     val submitting: Boolean = false,
+    /** The authoritative pre-commit breakdown from /deliver/preview (shown on the Preview step). */
+    val preview: DeliveryExecutionResult? = null,
+    val previewing: Boolean = false,
     val result: DeliveryExecutionResult? = null,
     val queuedOffline: Boolean = false,
     val error: String? = null,
@@ -56,15 +60,17 @@ data class DeliveryState(
 }
 
 /**
- * DP-08 doorstep → DP-09 payment → DP-11 complete (DP-10 offline is the "queued" variant of Done).
- * The `/deliver` call carries the payment mode and settles server-side, so it fires once, at confirm.
- * Amounts on DP-08/09 are a client estimate of products; deposits/floor/wallet come back authoritative
- * in the DeliveryExecutionResult (there is no pre-deliver quote endpoint).
+ * DP-08 doorstep → DP-09 payment → DP-09 **preview** (authoritative breakdown) → DP-11 complete (DP-10
+ * offline is the "queued" variant of Done). The driver now sees the EXACT money the backend will charge
+ * (floor delta + extra can deposit + amount payable) BEFORE committing: we call `/deliver/preview` via
+ * [DeliverPreview.preview] to fill the receipt, and commit with [DeliverPreview.confirm]. The commit still
+ * fires once and settles server-side.
  */
 class DeliveryViewModel(
     private val orderId: Long,
     private val driver: DriverRepository,
     private val delivery: DeliveryRepository,
+    private val deliverPreview: DeliverPreview,
 ) : ViewModel() {
     private val _state = MutableStateFlow(DeliveryState())
     val state = _state.asStateFlow()
@@ -110,21 +116,46 @@ class DeliveryViewModel(
     fun setPaymentMode(mode: String) = _state.update { it.copy(paymentMode = mode) }
 
     fun toPayment() = _state.update { it.copy(step = DeliveryStep.Payment, error = null) }
-    fun backToExecution() = _state.update { it.copy(step = DeliveryStep.Execution) }
+    fun backToExecution() = _state.update { it.copy(step = DeliveryStep.Execution, preview = null) }
+    fun backToPayment() = _state.update { it.copy(step = DeliveryStep.Payment, preview = null, error = null) }
 
-    fun confirm() {
-        if (_state.value.submitting) return
+    /** Build the deliver payload from the current door entries. */
+    private fun buildRequest(): RecordDeliveryRequest {
         val s = _state.value
-        val request = RecordDeliveryRequest(
+        return RecordDeliveryRequest(
             actualFloor = s.actualFloor,
             actualHasLift = s.actualHasLift,
             lines = s.lines.map { DeliveryLine(it.productId, it.deliveredQty, it.emptiesCollected, it.unitPrice) },
             paymentMode = s.paymentMode,
             paymentPending = false,
         )
+    }
+
+    /**
+     * Fetch the authoritative breakdown WITHOUT committing, then advance to the Preview step so the driver
+     * can see the exact amount payable (and tell the customer) before confirming. If the preview call fails
+     * online we surface the error; the driver can still retry.
+     */
+    fun toPreview() {
+        if (_state.value.previewing) return
+        viewModelScope.launch {
+            _state.update { it.copy(previewing = true, error = null) }
+            when (val r = deliverPreview.preview(orderId, buildRequest())) {
+                is ApiResult.Success ->
+                    _state.update { it.copy(previewing = false, preview = r.data, step = DeliveryStep.Preview) }
+                is ApiResult.Failure ->
+                    // Offline → there's nothing to preview; let the driver confirm directly (will queue).
+                    if (r.offline) _state.update { it.copy(previewing = false, preview = null, step = DeliveryStep.Preview) }
+                    else _state.update { it.copy(previewing = false, error = r.message) }
+            }
+        }
+    }
+
+    fun confirm() {
+        if (_state.value.submitting) return
         viewModelScope.launch {
             _state.update { it.copy(submitting = true, error = null) }
-            when (val out = delivery.deliver(orderId, request)) {
+            when (val out = deliverPreview.confirm(orderId, buildRequest())) {
                 is DeliverOutcome.Recorded ->
                     _state.update { it.copy(submitting = false, step = DeliveryStep.Done, result = out.result, queuedOffline = out.result.paymentPending) }
                 DeliverOutcome.Queued ->
@@ -149,7 +180,7 @@ class DeliveryViewModel(
 
     companion object {
         fun factory(orderId: Long) = viewModelFactory {
-            initializer { DeliveryViewModel(orderId, Deps.driverRepository, Deps.deliveryRepository) }
+            initializer { DeliveryViewModel(orderId, Deps.driverRepository, Deps.deliveryRepository, Deps.deliverPreview) }
         }
     }
 }

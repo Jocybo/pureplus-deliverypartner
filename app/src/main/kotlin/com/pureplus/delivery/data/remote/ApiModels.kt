@@ -67,6 +67,14 @@ data class CheckOutRequest(
     val longitude: Double?,
 )
 
+/**
+ * ShiftV2 end/resume body — just the shift date (the backend binds CheckOutRequest but only reads ShiftDate;
+ * lat/lng are irrelevant for a state transition). shiftDate defaults to today in the repository.
+ */
+data class EndShiftRequest(
+    val shiftDate: String,
+)
+
 data class CheckInDto(
     val id: Int = 0,
     val driverId: Int = 0,
@@ -81,6 +89,11 @@ data class CheckInDto(
     val isOverride: Boolean = false,
     val overrideReason: String? = null,
     val status: String = "",
+    /**
+     * ShiftV2 (Phase 2 DutyShift) duty state: ACTIVE | PENDING_RECON | CLOSED | AUTO_CLOSED | FORCE_CLOSED.
+     * NULL on pre-ShiftV2 stores — treat null as "legacy, no duty-shift state" (feature-detect).
+     */
+    val dutyStatus: String? = null,
     val checkedOutAt: String? = null,
 )
 
@@ -133,6 +146,10 @@ data class Stop(
     val longitude: Double? = null,
     val floorNo: Int? = null,
     val lift: Boolean? = null,
+    /** Phase 5 route sequencing: estimated arrival "HH:mm" (IST); null when sequencing off / no coordinates. */
+    val eta: String? = null,
+    /** Phase 5 route sequencing: estimated road distance in km (LegKm × 1.3); null when off / no coordinates. */
+    val roadKm: Double? = null,
     /** present on the DP-06 detail response only. */
     val items: List<StopItem>? = null,
 )
@@ -292,6 +309,15 @@ data class OrderExceptionDto(
     val resolvedAt: String? = null,
 )
 
+// ── DP-12 contact attempt (fail-gate) ──────────────────────────────────────────────
+// A call the driver logs before a delivery may be marked failed (≥1 attempt required unless refused).
+// outcome: NO_ANSWER | REFUSED | WRONG_NUMBER | WILL_RECEIVE. POST /orders/{id}/attempts returns the new
+// attempt row's id as a BARE integer inside the envelope ({success, data: 42, message}) — not an object.
+data class RecordAttemptRequest(
+    val outcome: String?,
+    val notes: String? = null,
+)
+
 // ── lifecycle transition (DP-11 continue / status walk) ───────────────────────────
 data class TransitionRequest(val toStatus: String, val remarks: String? = null)
 
@@ -352,6 +378,19 @@ data class DriverDocument(
     val issueDate: String? = null,
     val expiryDate: String? = null,
     val status: String? = null,
+)
+
+/**
+ * Submit a document for Store-Admin approval (POST /me/documents) — lands as PENDING, returns the driver's
+ * FULL document list (not just the one). docType: AADHAAR | PAN | DRIVING_LICENCE | BANK_PASSBOOK |
+ * VEHICLE_RC | VEHICLE_INSURANCE | OTHER. Dates are yyyy-MM-dd.
+ */
+data class SubmitDocumentRequest(
+    val docType: String,
+    val docNumber: String? = null,
+    val fileUrl: String? = null,
+    val issueDate: String? = null,
+    val expiryDate: String? = null,
 )
 
 data class DriverShiftInfo(
@@ -416,3 +455,123 @@ data class MarkedResult(val marked: Boolean = false)
 
 /** POST .../read-all → { marked: Int } (count marked). */
 data class MarkedCountResult(val marked: Int = 0)
+
+// ── DP-14 bulk/event delivery jobs ──────────────────────────────────────────────────
+// GET /bulk-jobs?status=OUT_FOR_DELIVERY → this driver's bulk jobs (mirror of the backend BulkRequestDto).
+data class BulkJob(
+    val id: Int = 0,
+    val customerId: Int = 0,
+    val requestType: String = "",      // NORMAL (B2B) | EVENT
+    val productId: Int = 0,
+    val quantity: Int = 0,
+    val requestedDate: String = "",
+    val addressId: Int? = null,
+    val gstin: String? = null,
+    val eventDetails: String? = null,
+    val status: String = "",
+    val estimatedAmount: Double? = null,
+    val advanceAmount: Double? = null,
+    val advancePaid: Double = 0.0,
+    val advanceForfeited: Double = 0.0,
+    val counterDate: String? = null,
+    val counterQuantity: Int? = null,
+    val counterNote: String? = null,
+    val reviewNote: String? = null,
+    val escalated: Boolean = false,
+    val storeId: Int? = null,
+    val assignedDriverId: Int? = null,
+    val assignedVehicleId: Int? = null,
+    val scheduledDeliveryDate: String? = null,
+    val createdAt: String = "",
+    val allowedTransitions: List<String> = emptyList(),
+)
+
+// POST /bulk-jobs/{id}/deliver → the fulfilment result (consolidated deposit / B2B postpaid / event pickup).
+data class BulkDeliveryResult(
+    val bulkRequestId: Int = 0,
+    val status: String = "",
+    val requestType: String = "",
+    val quantity: Int = 0,
+    val isReusable: Boolean = false,
+    val consolidatedDeposit: Double = 0.0,
+    val cansIssued: Int = 0,
+    val postpaidCharged: Boolean = false,
+    val postpaidAmount: Double = 0.0,
+    val emptyPickupScheduledDate: String? = null,
+)
+
+// ── DP-03 / DP-04 / DP-15 vehicle stock ──────────────────────────────────────────────
+// GET /vehicle-stock → the driver's cans-on-board snapshot for the shift (mirror of VehicleStockDto).
+data class VehicleStock(
+    val enabled: Boolean = false,          // stock gate on OUT_FOR_DELIVERY
+    val sessionId: Int? = null,
+    val driverId: Int = 0,
+    val driverName: String? = null,
+    val storeId: Int = 0,
+    val shiftDate: String? = null,
+    val sessionStatus: String? = null,
+    val stockMode: String? = null,         // STORE (legacy) | VEHICLE
+    val vehicleId: Int? = null,
+    val capacity: Int? = null,             // the vehicle's can capacity; null when no vehicle assigned
+    val trips: Int = 0,
+    val lines: List<VehicleStockLine> = emptyList(),
+    val waitingOrders: List<WaitingOrderLine> = emptyList(),
+)
+
+data class VehicleStockLine(
+    val productId: Int = 0,
+    val productName: String? = null,
+    val loadedOut: Int = 0,
+    val delivered: Int = 0,
+    val returned: Int = 0,
+    val breakage: Int = 0,
+    val onBoard: Int = 0,
+    val reserved: Int = 0,
+    val free: Int = 0,
+    val emptiesOnBoard: Int = 0,
+)
+
+data class WaitingOrderLine(
+    val orderId: Int = 0,
+    val productId: Int = 0,
+    val quantity: Int = 0,
+    val free: Int = 0,
+    val shortfall: Int = 0,
+)
+
+// GET /vehicle-stock/trips?from&to → load-out trip history (newest first).
+data class VehicleTrip(
+    val sessionId: Int = 0,
+    val tripNo: Int = 0,
+    val loadedAt: String = "",             // yyyy-MM-dd HH:mm (IST)
+    val shiftDate: String = "",
+    val cans: Int = 0,
+    val clientRef: String? = null,
+    val batches: List<TripBatch> = emptyList(),
+)
+
+data class TripBatch(
+    val batchNumber: String = "",
+    val cans: Int = 0,
+)
+
+// GET /vehicle-stock/returns?from&to → return history (fulls + empties handed back; newest first).
+data class VehicleReturn(
+    val sessionId: Int = 0,
+    val returnedAt: String = "",           // yyyy-MM-dd HH:mm (IST)
+    val shiftDate: String = "",
+    val fulls: Int = 0,                    // full cans returned to store
+    val empties: Int = 0,                  // empty cans returned to store
+)
+
+// POST /vehicle-stock/return — undelivered fulls and/or collected empties back into the store.
+data class VehicleReturnLine(
+    val productId: Int,
+    val fulls: Int,
+    val empties: Int,
+)
+
+data class VehicleReturnRequest(
+    val clientRef: String? = null,
+    val lines: List<VehicleReturnLine>,
+)

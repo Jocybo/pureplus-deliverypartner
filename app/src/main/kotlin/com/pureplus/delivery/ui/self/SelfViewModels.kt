@@ -6,6 +6,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.pureplus.delivery.data.remote.CheckInDto
 import com.pureplus.delivery.data.remote.DriverDelivery
+import com.pureplus.delivery.data.remote.DriverDocument
 import com.pureplus.delivery.data.remote.DriverProfile
 import com.pureplus.delivery.data.remote.DriverShiftInfo
 import com.pureplus.delivery.data.remote.DriverStore
@@ -15,6 +16,7 @@ import com.pureplus.delivery.data.remote.EarningsResponse
 import com.pureplus.delivery.data.remote.Geofence
 import com.pureplus.delivery.data.remote.GoalResponse
 import com.pureplus.delivery.data.remote.NotificationItem
+import com.pureplus.delivery.data.remote.SubmitDocumentRequest
 import com.pureplus.delivery.data.repository.ApiResult
 import com.pureplus.delivery.data.repository.DriverRepository
 import com.pureplus.delivery.di.Deps
@@ -250,8 +252,11 @@ data class ProfileState(
     val store: DriverStore? = null,
     val shift: DriverShiftInfo? = null,
     val zones: List<DriverZone> = emptyList(),
+    val documents: List<DriverDocument> = emptyList(),
     val unread: Int = 0,
     val savingContact: Boolean = false,
+    val submittingDoc: Boolean = false,
+    val docMessage: String? = null,
     val error: String? = null,
 )
 
@@ -281,6 +286,7 @@ class ProfileViewModel(private val driver: DriverRepository) : ViewModel() {
             val store = driver.store()
             val shift = driver.shiftInfo()
             val zones = driver.zones()
+            val documents = driver.documents()
             val unread = driver.unreadCount()
             _state.update {
                 it.copy(
@@ -290,9 +296,46 @@ class ProfileViewModel(private val driver: DriverRepository) : ViewModel() {
                     store = (store as? ApiResult.Success)?.data ?: it.store,
                     shift = (shift as? ApiResult.Success)?.data ?: it.shift,
                     zones = (zones as? ApiResult.Success)?.data ?: it.zones,
+                    documents = (documents as? ApiResult.Success)?.data ?: it.documents,
                     unread = (unread as? ApiResult.Success)?.data?.unread ?: it.unread,
                     error = (profile as? ApiResult.Failure)?.message,
                 )
+            }
+        }
+    }
+
+    /**
+     * Submit a document for Store-Admin approval (DP-21). No file-upload vendor is wired, so we send the
+     * fields the backend expects (type + number + optional file URL / dates); it lands as PENDING and the
+     * backend returns the refreshed full document list. [fileUrl] is optional (a link the driver pastes).
+     */
+    fun submitDocument(
+        docType: String,
+        docNumber: String?,
+        fileUrl: String?,
+        issueDate: String?,
+        expiryDate: String?,
+        onDone: (Boolean) -> Unit = {},
+    ) {
+        if (_state.value.submittingDoc) return
+        viewModelScope.launch {
+            _state.update { it.copy(submittingDoc = true, docMessage = null, error = null) }
+            val req = SubmitDocumentRequest(
+                docType = docType,
+                docNumber = docNumber?.ifBlank { null },
+                fileUrl = fileUrl?.ifBlank { null },
+                issueDate = issueDate?.ifBlank { null },
+                expiryDate = expiryDate?.ifBlank { null },
+            )
+            when (val r = driver.submitDocument(req)) {
+                is ApiResult.Success -> {
+                    _state.update { it.copy(submittingDoc = false, documents = r.data, docMessage = "Submitted — pending store approval.") }
+                    onDone(true)
+                }
+                is ApiResult.Failure -> {
+                    _state.update { it.copy(submittingDoc = false, error = r.message) }
+                    onDone(false)
+                }
             }
         }
     }

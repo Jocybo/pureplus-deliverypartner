@@ -5,6 +5,7 @@ import com.pureplus.delivery.data.remote.CheckInDto
 import com.pureplus.delivery.data.remote.CheckInRequest
 import com.pureplus.delivery.data.remote.CheckInStatus
 import com.pureplus.delivery.data.remote.CheckOutRequest
+import com.pureplus.delivery.data.remote.EndShiftRequest
 import com.pureplus.delivery.data.remote.DriverDelivery
 import com.pureplus.delivery.data.remote.DriverDocument
 import com.pureplus.delivery.data.remote.DriverProfile
@@ -22,8 +23,13 @@ import com.pureplus.delivery.data.remote.NotificationItem
 import com.pureplus.delivery.data.remote.RetrofitClient
 import com.pureplus.delivery.data.remote.RouteSummary
 import com.pureplus.delivery.data.remote.Stop
+import com.pureplus.delivery.data.remote.SubmitDocumentRequest
 import com.pureplus.delivery.data.remote.UnreadCount
 import com.pureplus.delivery.data.remote.UpdateProfileRequest
+import com.pureplus.delivery.data.remote.VehicleReturn
+import com.pureplus.delivery.data.remote.VehicleReturnRequest
+import com.pureplus.delivery.data.remote.VehicleStock
+import com.pureplus.delivery.data.remote.VehicleTrip
 import com.pureplus.delivery.util.todayIso
 
 /**
@@ -41,6 +47,9 @@ class DriverRepository {
 
     // DP-06 stop detail (items included)
     suspend fun stopDetail(orderId: Long): ApiResult<Stop> = apiCall { api.stopDetail(ApiConstants.meStop(orderId)) }
+
+    // "Completed today" list (orders this driver has already delivered today).
+    suspend fun stopsCompleted(): ApiResult<List<Stop>> = apiCall { api.stopsCompleted() }
 
     // DP-02 check-in (geo-fenced). lat/long null = GPS failure → needs an override.
     suspend fun checkIn(
@@ -63,6 +72,14 @@ class DriverRepository {
     suspend fun checkOut(lat: Double?, lng: Double?, shiftDate: String = todayIso()): ApiResult<CheckInDto> =
         apiCall { api.checkOut(CheckOutRequest(shiftDate, lat, lng)) }
 
+    // ShiftV2 (Phase 2): end the shift → PENDING_RECON (blocked while active orders remain). Reversible.
+    suspend fun endShift(shiftDate: String = todayIso()): ApiResult<CheckInDto> =
+        apiCall { api.endShift(EndShiftRequest(shiftDate)) }
+
+    // ShiftV2 (Phase 2): resume a shift ended by mistake → ACTIVE.
+    suspend fun resumeShift(shiftDate: String = todayIso()): ApiResult<CheckInDto> =
+        apiCall { api.resumeShift(EndShiftRequest(shiftDate)) }
+
     // DP-19 attendance history
     suspend fun attendance(from: String? = null, to: String? = null): ApiResult<List<CheckInDto>> =
         apiCall { api.attendance(from, to) }
@@ -83,6 +100,9 @@ class DriverRepository {
     suspend fun updateContactNumber(contactNumber: String): ApiResult<DriverProfile> =
         apiCall { api.updateProfile(UpdateProfileRequest(contactNumber)) }
     suspend fun documents(): ApiResult<List<DriverDocument>> = apiCall { api.documents() }
+    // Submit a document for Store-Admin approval → returns the refreshed full document list.
+    suspend fun submitDocument(request: SubmitDocumentRequest): ApiResult<List<DriverDocument>> =
+        apiCall { api.submitDocument(request) }
     suspend fun shiftInfo(): ApiResult<DriverShiftInfo> = apiCall { api.shiftInfo() }
     suspend fun store(): ApiResult<DriverStore> = apiCall { api.store() }
     suspend fun vehicle(): ApiResult<DriverVehicle> = apiCall { api.vehicle() }
@@ -91,6 +111,16 @@ class DriverRepository {
     // DP-20 delivery history
     suspend fun deliveries(from: String? = null, to: String? = null): ApiResult<List<DriverDelivery>> =
         apiCall { api.deliveries(from, to) }
+
+    // DP-03 / DP-04 / DP-15 vehicle stock (cans on board, trips, returns).
+    suspend fun vehicleStock(): ApiResult<VehicleStock> = apiCall { api.vehicleStock() }
+    suspend fun vehicleTrips(from: String? = null, to: String? = null): ApiResult<List<VehicleTrip>> =
+        apiCall { api.vehicleTrips(from, to) }
+    suspend fun vehicleReturns(from: String? = null, to: String? = null): ApiResult<List<VehicleReturn>> =
+        apiCall { api.vehicleReturns(from, to) }
+    // DP-15 record a return (undelivered fulls + collected empties) → the refreshed stock snapshot.
+    suspend fun recordReturn(request: VehicleReturnRequest): ApiResult<VehicleStock> =
+        apiCall { api.vehicleReturn(request) }
 
     // In-app notifications
     suspend fun notifications(unreadOnly: Boolean = false, limit: Int = 50): ApiResult<List<NotificationItem>> =

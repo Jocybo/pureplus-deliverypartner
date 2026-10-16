@@ -26,14 +26,18 @@ import com.pureplus.delivery.ui.components.OutlineButton
 import com.pureplus.delivery.ui.components.PpCard
 import com.pureplus.delivery.ui.components.PrimaryButton
 import com.pureplus.delivery.ui.components.SectionLabel
+import com.pureplus.delivery.ui.components.TextLink
 import com.pureplus.delivery.ui.components.Tone
 import com.pureplus.delivery.ui.theme.PpColor
 import com.pureplus.delivery.ui.theme.PpType
 import com.pureplus.delivery.util.money
 
 /**
- * DP-22 · Shift check-out. Reconciled mode (from close-out) gates on cans+cash balancing; direct mode
- * ("checked in by mistake", [sessionId] null) does an attendance-only check-out when nothing was run.
+ * DP-22 · Shift check-out. Two-step on ShiftV2: **End shift** (→ awaiting reconciliation) → reconcile +
+ * declare (DP-15/16) → **Clock out** (hard-gated by the store's verification). While awaiting the store,
+ * the driver may **Resume** to undo an end done by mistake. The terminal "shift completed" banner shows
+ * only once the backend reports CLOSED / AUTO_CLOSED / FORCE_CLOSED. Legacy stores keep the old
+ * both-loops-balance close; a mistaken no-run check-in gets an attendance-only end.
  */
 @Composable
 fun CheckOutScreen(
@@ -50,28 +54,55 @@ fun CheckOutScreen(
 
     Column(Modifier.fillMaxSize().background(PpColor.Canvas)) {
         Column(Modifier.fillMaxWidth().background(PpColor.Ink900).padding(18.dp)) {
-            if (!state.directMode) {
+            if (!state.directMode && state.phase != CheckOutPhase.Completed) {
                 CloseOutStepper(current = 3)
                 Spacer(Modifier.height(11.dp))
             }
-            Text(if (state.directMode) "End shift" else "Shift summary", style = PpType.screenTitle.copy(color = PpColor.White))
+            val title = when (state.phase) {
+                CheckOutPhase.PendingRecon -> "Clock out"
+                CheckOutPhase.Completed -> "Shift complete"
+                else -> if (state.directMode) "End shift" else "Shift summary"
+            }
+            Text(title, style = PpType.screenTitle.copy(color = PpColor.White))
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.loading -> LoadingState()
+                state.phase == CheckOutPhase.Completed -> CompletedBody(state)
+                state.phase == CheckOutPhase.PendingRecon -> PendingReconBody(state)
                 state.directMode -> DirectBody(state)
                 else -> ReconciledBody(state)
             }
         }
 
-        Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(16.dp)) {
-            when {
-                state.directMode && state.canEndDirect ->
-                    PrimaryButton("End shift", onClick = viewModel::checkOut, loading = state.submitting, container = PpColor.Ink900, height = 62)
-                state.directMode && state.blockedByActivity ->
-                    OutlineButton("Go to close-out", onClick = onGoCloseOut)
-                !state.directMode ->
+        Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            when (state.phase) {
+                CheckOutPhase.Completed -> PrimaryButton("Done", onClick = onCheckedOut, container = PpColor.Ink900, height = 62)
+
+                CheckOutPhase.PendingRecon -> {
+                    // Clock out is the terminal action; the backend owns the "verified yet?" gate.
+                    PrimaryButton(
+                        text = "Clock out",
+                        onClick = viewModel::checkOut,
+                        loading = state.submitting,
+                        container = PpColor.Ink900,
+                        height = 62,
+                    )
+                    // Undo an end done by mistake.
+                    TextLink("Ended by mistake? Resume shift", onClick = viewModel::resume, color = PpColor.Ink500)
+                }
+
+                CheckOutPhase.EndShift -> when {
+                    state.directMode && state.canEndDirect ->
+                        PrimaryButton("End shift", onClick = viewModel::endShift, loading = state.ending, container = PpColor.Ink900, height = 62)
+                    state.directMode && state.blockedByActivity ->
+                        OutlineButton("Go to close-out", onClick = onGoCloseOut)
+                    else ->
+                        PrimaryButton("End shift", onClick = viewModel::endShift, loading = state.ending, container = PpColor.Ink900, height = 62)
+                }
+
+                CheckOutPhase.LegacyClose ->
                     PrimaryButton(
                         text = "Check out · end shift",
                         onClick = viewModel::checkOut,
@@ -80,8 +111,43 @@ fun CheckOutScreen(
                         container = PpColor.Ink900,
                         height = 62,
                     )
+
+                CheckOutPhase.Loading -> Unit
             }
         }
+    }
+}
+
+@Composable
+private fun CompletedBody(state: CheckOutState) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        NotePanel(
+            "Your shift is closed for the day. Cash and cans are settled; the store has verified your handover. See you next shift.",
+            tone = Tone.Success,
+        )
+        if (state.error != null) NotePanel(state.error!!, tone = Tone.Danger)
+    }
+}
+
+@Composable
+private fun PendingReconBody(state: CheckOutState) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        NotePanel(
+            "Duty ended — your cash and cans are declared and waiting for the store to verify the handover. " +
+                "You can clock out once the store confirms (and no orders are still out for delivery).",
+            tone = Tone.Pending,
+        )
+        state.session?.cash?.let { c ->
+            PpCard {
+                SectionLabel("Cash")
+                Spacer(Modifier.height(8.dp))
+                LabeledRow("Declared cash", money(c.declaredCash))
+                Spacer(Modifier.height(6.dp))
+                LabeledRow("Variance", money(c.cashVariance, signed = true))
+            }
+        }
+        // Any backend clock-out rejection shows here verbatim (e.g. "store hasn't verified yet…").
+        if (state.error != null) NotePanel(state.error!!, tone = Tone.Danger)
     }
 }
 

@@ -85,7 +85,8 @@ credential if it supplies username+password, which is optional), so the password
 (`api/admin/auth/login`) is kept only as an unused fallback. Until MSG91 SMS is wired the backend echoes
 a demo OTP, which the login screen shows. `AuthInterceptor` attaches the bearer from `TokenStore`.
 **Every path lives only in `ApiConstants.kt`** — the app is on the clean **`/api/delivery/*`** surface;
-the only remaining `/api/admin` call is bulk fulfilment (DP-14). All `/api/delivery` operational
+bulk fulfilment (DP-14) was repointed to `api/delivery/bulk-jobs`, so the only remaining `/api/admin`
+reference is the unused password-login fallback. All `/api/delivery` operational
 responses use the `{success,data,message}` envelope (unwrapped by `apiCall`); the two auth endpoints are
 the bare-body exception.
 

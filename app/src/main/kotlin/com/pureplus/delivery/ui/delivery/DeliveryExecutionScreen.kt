@@ -61,6 +61,7 @@ fun DeliveryScreen(
                 Box(Modifier.weight(1f).fillMaxWidth()) { LoadingState() }
             }
             state.step == DeliveryStep.Done -> DoneStep(state, onDone)
+            state.step == DeliveryStep.Preview -> PreviewStep(viewModel, state)
             state.step == DeliveryStep.Payment -> PaymentStep(viewModel, state, onBack)
             else -> ExecutionStep(viewModel, state, onBack)
         }
@@ -146,6 +147,41 @@ private fun ColumnScope.PaymentStep(vm: DeliveryViewModel, state: DeliveryState,
         }
         if (state.error != null) NotePanel(state.error!!, tone = Tone.Danger)
         TextLink("Back — change what was delivered", onClick = vm::backToExecution)
+    }
+    Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Go to the authoritative preview first — the driver sees the real amount before confirming.
+        PrimaryButton("Review the amount", onClick = vm::toPreview, loading = state.previewing, container = if (state.isPostpaid) PpColor.Postpaid else PpColor.Success, height = 62)
+        Text("You'll see the exact charge (deposit + floor) before confirming.", style = PpType.bodySm.copy(color = PpColor.Ink500), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun ColumnScope.PreviewStep(vm: DeliveryViewModel, state: DeliveryState) {
+    val p = state.preview
+    val payable = p?.amountPayable ?: state.productsSubtotal
+    Column(Modifier.fillMaxWidth().background(PpColor.Ink900).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        SectionLabel(if (state.isPostpaid) "Ledger to account" else "Collect from ${state.stop?.receiverName ?: "customer"}", color = PpColor.BrandOnDark)
+        Spacer(Modifier.height(8.dp))
+        Text(money(payable), style = PpType.amountXl.copy(color = PpColor.White))
+        Text("confirmed by the system", style = PpType.bodySm.copy(color = PpColor.BrandOnDark))
+    }
+    Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+        if (p != null) {
+            val rows = buildList {
+                add(ReceiptLine("Products", p.orderAmount))
+                if (p.extraDeposit > 0) add(ReceiptLine("New can deposit", p.extraDeposit, LineKind.Addition))
+                if (p.actualFloorCharge > 0) add(ReceiptLine("Floor charge · ${p.actualFloor}F", p.actualFloorCharge, LineKind.Addition))
+                if (p.walletCredit > 0) add(ReceiptLine("Wallet credit", -p.walletCredit, LineKind.Credit))
+            }
+            Receipt(rows, if (state.isPostpaid) "To ledger" else "To collect", p.amountPayable)
+            if (p.extraDeposit > 0) {
+                NotePanel("Includes a fresh deposit for cans not returned. Tell the customer before you collect.", tone = Tone.Pending)
+            }
+        } else {
+            NotePanel("You're offline — the exact breakdown will settle when you reconnect. Collect the order amount shown.", tone = Tone.Pending)
+        }
+        if (state.error != null) NotePanel(state.error!!, tone = Tone.Danger)
+        TextLink("Back — change payment / what was delivered", onClick = vm::backToPayment)
     }
     Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         val label = when {

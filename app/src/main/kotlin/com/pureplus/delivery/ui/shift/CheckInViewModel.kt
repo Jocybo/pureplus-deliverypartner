@@ -9,6 +9,8 @@ import com.pureplus.delivery.PurePlusDeliveryApp
 import com.pureplus.delivery.data.repository.ApiResult
 import com.pureplus.delivery.data.repository.DriverRepository
 import com.pureplus.delivery.di.Deps
+import com.pureplus.delivery.domain.ShiftLifecycle
+import com.pureplus.delivery.domain.ShiftState
 import com.pureplus.delivery.util.LocationProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +48,8 @@ data class CheckInState(
     val checkedIn: Boolean = false,
     /** the driver already checked in AND out today — the shift is done (one check-in per day). */
     val shiftCompleted: Boolean = false,
+    /** The resolved duty-shift state (ShiftV2) or Legacy — drives the run/off-shift/completed decision. */
+    val shiftState: ShiftState? = null,
     /** false until the initial check-in-status call returns — the Run tab waits on this to avoid a flash. */
     val statusResolved: Boolean = false,
     /** the last *server* attempt was rejected (out of fence) — offer a logged override. */
@@ -73,6 +77,7 @@ data class CheckInState(
 class CheckInViewModel(
     private val driver: DriverRepository,
     private val location: LocationProvider,
+    private val shiftLifecycle: ShiftLifecycle,
 ) : ViewModel() {
     private val _state = MutableStateFlow(CheckInState())
     val state = _state.asStateFlow()
@@ -110,17 +115,30 @@ class CheckInViewModel(
             }
             is ApiResult.Failure -> Unit
         }
-        when (val s = driver.checkInStatus()) {
+        // Drive off the ShiftState machine (feature-detected: Legacy when the store sends no dutyStatus).
+        when (val st = shiftLifecycle.currentState()) {
             is ApiResult.Success -> {
-                // "checkedIn" stays true for the whole day once a check-in row exists — so only
-                // auto-advance to the run when the shift is genuinely OPEN (not yet checked out).
-                // Otherwise a driver who ended their shift gets bounced back into the run.
-                val shiftOpen = s.data.checkedIn && s.data.checkIn?.checkedOutAt == null
-                // Checked in AND out today = shift done. The backend allows one check-in per day,
-                // so we show a "completed" state rather than a check-in button that would be rejected.
-                val completed = s.data.checkedIn && s.data.checkIn?.checkedOutAt != null
-                if (shiftOpen) _state.update { it.copy(alreadyCheckedIn = true) }
-                else if (completed) _state.update { it.copy(shiftCompleted = true) }
+                val state = st.data
+                val shiftOpen: Boolean
+                val completed: Boolean
+                when (state) {
+                    // Legacy store: a check-in row with no checked-out time = shift open; a row with a
+                    // checked-out time (checkedIn=false, but OffShift would be returned if NO row existed)
+                    // = done for the day.
+                    is ShiftState.Legacy -> {
+                        shiftOpen = state.checkedIn
+                        completed = !state.checkedIn
+                    }
+                    // ShiftV2 ACTIVE or PENDING_RECON = still on the run (PENDING_RECON finishes close-out
+                    // from the run area). CLOSED / AUTO_CLOSED / FORCE_CLOSED = done for the day.
+                    ShiftState.Active, ShiftState.PendingRecon -> { shiftOpen = true; completed = false }
+                    ShiftState.Closed, ShiftState.AutoClosed, ShiftState.ForceClosed -> { shiftOpen = false; completed = true }
+                    // No shift started yet today → show the check-in flow.
+                    ShiftState.OffShift -> { shiftOpen = false; completed = false }
+                }
+                _state.update {
+                    it.copy(shiftState = state, alreadyCheckedIn = shiftOpen, shiftCompleted = completed)
+                }
             }
             is ApiResult.Failure -> Unit
         }
@@ -228,7 +246,7 @@ class CheckInViewModel(
     companion object {
         val Factory = viewModelFactory {
             initializer {
-                CheckInViewModel(Deps.driverRepository, LocationProvider(PurePlusDeliveryApp.instance))
+                CheckInViewModel(Deps.driverRepository, LocationProvider(PurePlusDeliveryApp.instance), Deps.shiftLifecycle)
             }
         }
     }

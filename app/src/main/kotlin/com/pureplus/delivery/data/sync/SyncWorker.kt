@@ -70,6 +70,11 @@ class SyncWorker(appContext: Context, params: WorkerParameters) :
                 val req = gson.fromJson(entry.bodyJson, CloseSessionRequest::class.java)
                 api.closeSession(entry.url, req).ensureOk("close")
             }
+            OutboxOperation.DECLARE_SESSION -> {
+                // ShiftV2 terminal write — no body. The state transition (OPEN→DRIVER_DECLARED) is
+                // idempotent server-side, so a replay after reconnect is safe.
+                api.declareSession(entry.url).ensureOk("declare")
+            }
             else -> error("Unknown outbox operation: ${entry.operation}")
         }
     }

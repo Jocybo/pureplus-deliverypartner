@@ -99,6 +99,10 @@ fun StopCard(
             Row(Modifier.fillMaxWidth().padding(top = 11.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (stop.cans > 0) com.pureplus.delivery.ui.components.Tag("${stop.cans} cans")
                 FloorLiftTag(stop.floorNo, stop.lift)
+                // Phase 5 route-sequencing estimates (shown only when the backend sends them; never used
+                // to re-order stops client-side — the server's sequence is authoritative).
+                stop.eta?.takeIf { it.isNotBlank() }?.let { com.pureplus.delivery.ui.components.Tag("~$it") }
+                stop.roadKm?.let { com.pureplus.delivery.ui.components.Tag("${"%.1f".format(it)} km") }
             }
         }
     }

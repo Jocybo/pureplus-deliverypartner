@@ -56,7 +56,25 @@ class ReconciliationRepository(context: Context) {
         }
     }
 
-    // DP-22 — the both-loops gate.
+    // DP-22 — the both-loops gate (legacy pre-ShiftV2 close).
     suspend fun close(sessionId: Long, closeNote: String? = null): ApiResult<ReconciliationSession> =
         apiCall { api.closeSession(ApiConstants.reconClose(sessionId), CloseSessionRequest(closeNote)) }
+
+    /**
+     * ShiftV2 (Phase 3) — the driver's TERMINAL write: OPEN → DRIVER_DECLARED, then the session is
+     * read-only for the driver and awaits store verification. No body. Because this is the last thing a
+     * driver does on a shift, it must survive a network drop: on an offline failure it is queued to the
+     * outbox (DECLARE_SESSION) so it syncs on reconnect — mirroring the CLOSE_SESSION path. The transition
+     * is idempotent server-side, so a replay is safe.
+     */
+    suspend fun declare(sessionId: Long): ApiResult<ReconciliationSession> {
+        val url = ApiConstants.reconDeclare(sessionId)
+        return when (val r = apiCall { api.declareSession(url) }) {
+            is ApiResult.Success -> r
+            is ApiResult.Failure -> {
+                if (r.offline) outbox.enqueue(OutboxOperation.DECLARE_SESSION, url, body = null)
+                r
+            }
+        }
+    }
 }

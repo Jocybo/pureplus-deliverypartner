@@ -101,13 +101,31 @@ fun CashReconcileScreen(
                             NotePanel("Variance ${money(variance, signed = true)} — raised as a dispute for store admin, never written off.", tone = Tone.Danger)
                         }
                     }
+                    // ShiftV2: once declared, the handover is locked for the driver and awaits the store.
+                    if (state.declared) {
+                        NotePanel(
+                            "Handover declared. Waiting for the store to verify your cash and cans — you can't edit this now. " +
+                                "Clock out on the next step once the store confirms.",
+                            tone = Tone.Pending,
+                        )
+                    }
                     if (state.error != null) NotePanel(state.error!!, tone = Tone.Danger)
                 }
             }
         }
 
         Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(16.dp)) {
-            PrimaryButton("Submit for admin confirmation", onClick = { viewModel.submit { onNext(sessionId) } }, loading = state.submitting)
+            val label = when {
+                state.declared -> "Awaiting store verification"
+                state.shiftV2 -> "Declare handover"
+                else -> "Submit for admin confirmation"
+            }
+            PrimaryButton(
+                label,
+                onClick = { viewModel.submit { onNext(sessionId) } },
+                loading = state.submitting,
+                enabled = !state.declared,
+            )
         }
     }
 }
