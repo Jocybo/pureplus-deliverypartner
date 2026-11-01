@@ -66,16 +66,23 @@ class LocationService : Service() {
 
     @SuppressLint("MissingPermission")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startAsForeground()
-        if (hasLocationPermission()) {
-            val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, INTERVAL_MS)
-                .setMinUpdateIntervalMillis(MIN_INTERVAL_MS)
-                .build()
-            runCatching { client.requestLocationUpdates(request, callback, Looper.getMainLooper()) }
-                .onFailure { stopSelf() }
-        } else {
+        // Android 14+ throws SecurityException if a `location`-typed foreground service is started
+        // without the runtime grant. This happens when a shift was opened elsewhere (e.g. the web
+        // portal) and the app never asked for location permission, or on a sticky restart after the
+        // grant was revoked. Bail cleanly instead of crashing — never promote to foreground here.
+        if (!hasLocationPermission(this)) {
             stopSelf()
+            return START_NOT_STICKY
         }
+        if (!startAsForeground()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, INTERVAL_MS)
+            .setMinUpdateIntervalMillis(MIN_INTERVAL_MS)
+            .build()
+        runCatching { client.requestLocationUpdates(request, callback, Looper.getMainLooper()) }
+            .onFailure { stopSelf() }
         return START_STICKY
     }
 
@@ -85,7 +92,8 @@ class LocationService : Service() {
         super.onDestroy()
     }
 
-    private fun startAsForeground() {
+    /** Promote to a foreground service. Returns false (instead of crashing) if the OS rejects it. */
+    private fun startAsForeground(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
@@ -102,12 +110,8 @@ class LocationService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
-        ServiceCompat.startForeground(this, NOTIF_ID, notification, type)
+        return runCatching { ServiceCompat.startForeground(this, NOTIF_ID, notification, type) }.isSuccess
     }
-
-    private fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         private const val CHANNEL_ID = "pp_location"
@@ -115,11 +119,20 @@ class LocationService : Service() {
         private const val INTERVAL_MS = 20_000L
         private const val MIN_INTERVAL_MS = 10_000L
 
-        /** Start after check-in. No-op if location permission was denied (service self-stops). */
+        /**
+         * Start after check-in. No-op if location permission hasn't been granted — starting a
+         * `location`-typed foreground service without the runtime grant crashes on Android 14+
+         * (e.g. a shift opened on the web portal, with the app never having asked for permission).
+         */
         fun start(context: Context) {
+            if (!hasLocationPermission(context)) return
             val intent = Intent(context, LocationService::class.java)
             ContextCompat.startForegroundService(context, intent)
         }
+
+        private fun hasLocationPermission(context: Context): Boolean =
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
         /** Stop at check-out / logout. */
         fun stop(context: Context) {

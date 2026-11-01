@@ -57,6 +57,17 @@ data class DeliveryState(
     /** Client-side estimate shown before settlement; the server total is authoritative on confirm. */
     val productsSubtotal: Double get() = lines.sumOf { it.lineTotal }
     val totalShortfall: Int get() = lines.sumOf { it.shortfall }
+    /**
+     * Amount to collect at the door, taken straight from the backend ([Stop.collectAtDoor] =
+     * totalAmount + deposit). We display this rather than multiplying qty × unitPrice on the client —
+     * `item.quantity` is a CAN count while `unitPrice` is per-unit, so the old computation over-charged
+     * (e.g. 70 cans × ₹200 = ₹14,000 instead of the real ₹3,812). The /deliver/preview step remains the
+     * authoritative figure once the driver edits delivered qty / floor.
+     */
+    val collectAtDoorEstimate: Double
+        get() = stop?.collectAtDoor?.takeIf { it > 0 }
+            ?: stop?.totalAmount?.takeIf { it > 0 }
+            ?: productsSubtotal
 }
 
 /**

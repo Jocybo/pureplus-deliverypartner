@@ -68,14 +68,26 @@ fun StopDetailScreen(
         }
 
         Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            // The start-delivery transition can be refused by the backend (e.g. the van isn't loaded
+            // out for this order) — show that reason here so the driver knows to load out first.
+            state.actionError?.let { NotePanel(it, tone = Tone.Danger) }
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 OutlineButton("Navigate", onClick = {
                     state.stop?.let { openMaps(context, it.latitude, it.longitude, it.addressText()) }
                 }, modifier = Modifier.weight(1f))
                 OutlineButton("Can't deliver", onClick = onUnable, borderColor = PpColor.DangerBorder, contentColor = PpColor.Danger, modifier = Modifier.weight(1f))
             }
-            val postpaid = state.stop?.isPostpaid == true
-            PrimaryButton(if (postpaid) "Start delivery · no cash" else "Start delivery", onClick = onDeliver, height = 60)
+            val stop = state.stop
+            val ofd = stop?.isOutForDelivery == true
+            val postpaid = stop?.isPostpaid == true
+            val label = when {
+                ofd && postpaid -> "Continue delivery · no cash"
+                ofd -> "Continue delivery"
+                postpaid -> "Start delivery · no cash"
+                else -> "Start delivery"
+            }
+            // ASSIGNED → move OUT_FOR_DELIVERY first, then open the door flow (onDeliver); already-OFD skips straight through.
+            PrimaryButton(label, onClick = { viewModel.startDelivery(onReady = onDeliver) }, loading = state.starting, height = 60)
         }
     }
 }
@@ -139,7 +151,7 @@ private fun StopDetailBody(stop: Stop, context: android.content.Context) {
                         style = PpType.bodyStrong.copy(color = if (stop.isPostpaid) PpColor.Postpaid else PpColor.Success),
                     )
                 }
-                Text(money(stop.totalAmount), style = PpType.amount)
+                Text(money(stop.amountToCollect), style = PpType.amount)
             }
         }
     }

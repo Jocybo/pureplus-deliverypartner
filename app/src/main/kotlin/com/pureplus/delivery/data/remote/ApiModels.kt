@@ -134,6 +134,10 @@ data class Stop(
     val paymentTypeId: Int = 0,
     val paymentMode: String = "",
     val totalAmount: Double = 0.0,
+    /** Refundable can deposit the backend has already computed for this order. */
+    val depositAmount: Double = 0.0,
+    /** Authoritative amount to collect at the door (totalAmount + depositAmount). Use this — don't recompute. */
+    val collectAtDoor: Double = 0.0,
     val cans: Int = 0,
     val receiverName: String? = null,
     val receiverNumber: String? = null,

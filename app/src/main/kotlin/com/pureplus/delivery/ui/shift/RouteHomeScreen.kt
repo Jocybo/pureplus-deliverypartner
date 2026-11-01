@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pureplus.delivery.data.remote.Stop
+import com.pureplus.delivery.ui.stops.amountToCollect
 import com.pureplus.delivery.ui.components.BottomNavBar
 import com.pureplus.delivery.ui.components.DarkHeader
 import com.pureplus.delivery.ui.components.LinearProgress
@@ -127,7 +128,7 @@ private fun NextStopCard(stop: Stop, onOpen: (Long) -> Unit) {
             modifier = Modifier.padding(top = 4.dp),
         )
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(money(stop.totalAmount), style = PpType.amountMd.copy(color = PpColor.White))
+            Text(money(stop.amountToCollect), style = PpType.amountMd.copy(color = PpColor.White))
             Text("Open →", style = PpType.bodyStrong.copy(color = PpColor.Brand500), modifier = Modifier.padding(top = 4.dp))
         }
         Spacer(Modifier.height(10.dp))

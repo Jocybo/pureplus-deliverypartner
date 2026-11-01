@@ -26,7 +26,7 @@ data class StopListState(
     val visible: List<Stop> get() = when (filter) {
         StopFilter.All -> all
         StopFilter.Pending -> all.filter { it.status != "DELIVERED" && it.status != "FAILED" }
-        StopFilter.Postpaid -> all.filter { it.paymentMode.equals("POSTPAID", true) || it.paymentTypeId == 2 }
+        StopFilter.Postpaid -> all.filter { it.isPostpaid }
         StopFilter.Failed -> all.filter { it.status == "FAILED" }
     }
 }

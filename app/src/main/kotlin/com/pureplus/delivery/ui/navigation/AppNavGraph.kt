@@ -33,6 +33,7 @@ import com.pureplus.delivery.ui.self.NotificationsScreen
 import com.pureplus.delivery.ui.self.ProfileScreen
 import com.pureplus.delivery.ui.shift.LoadOutScreen
 import com.pureplus.delivery.ui.shift.RunTabScreen
+import com.pureplus.delivery.ui.shift.VehicleStockScreen
 import com.pureplus.delivery.ui.stops.StopDetailScreen
 import com.pureplus.delivery.ui.stops.StopListScreen
 
@@ -57,6 +58,7 @@ object Routes {
     const val ATTENDANCE_DETAIL = "attendance_detail/{checkInId}"
     const val HISTORY = "history"
     const val NOTIFICATIONS = "notifications"
+    const val VEHICLE_STOCK = "vehicle_stock"
 
     fun attendanceDetail(checkInId: Long) = "attendance_detail/$checkInId"
     fun stopDetail(orderId: Long) = "stop_detail/$orderId"
@@ -98,6 +100,12 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
     }
     fun toStopsFresh() = navController.navigate(Routes.STOPS) {
         popUpTo(Routes.STOPS) { inclusive = true }
+        launchSingleTop = true
+    }
+    // After a delivery is fully recorded, clear the ENTIRE back stack (stop detail, deliver, etc.)
+    // and land on a brand-new dashboard entry — so RouteHomeScreen is recreated and re-fetches the run.
+    fun toDashboardFresh() = navController.navigate(Routes.RUN) {
+        popUpTo(0) { inclusive = true }
         launchSingleTop = true
     }
 
@@ -149,6 +157,7 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },
                 onOpenNotifications = { navController.navigate(Routes.NOTIFICATIONS) },
                 onOpenBulk = { navController.navigate(Routes.BULK) },
+                onOpenVehicleStock = { navController.navigate(Routes.VEHICLE_STOCK) },
                 onLogout = { toLoggedOut() },
             )
         }
@@ -175,7 +184,7 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
             val orderId = entry.arguments?.getLong("orderId") ?: return@composable
             DeliveryScreen(
                 orderId = orderId,
-                onDone = { toStopsFresh() },
+                onDone = { toDashboardFresh() },
                 onBack = { navController.popBackStack() },
             )
         }
@@ -236,5 +245,6 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
         }
         composable(Routes.HISTORY) { HistoryScreen(onBack = { navController.popBackStack() }) }
         composable(Routes.NOTIFICATIONS) { NotificationsScreen(onBack = { navController.popBackStack() }) }
+        composable(Routes.VEHICLE_STOCK) { VehicleStockScreen(onBack = { navController.popBackStack() }) }
     }
 }

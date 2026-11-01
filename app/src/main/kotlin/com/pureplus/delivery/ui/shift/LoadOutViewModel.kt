@@ -36,9 +36,11 @@ data class LoadOutState(
 }
 
 /**
- * DP-04 · Loading confirmation. The required quantity per product is derived by aggregating the
- * shift's stop items (there is no dedicated "required load" endpoint); the driver confirms or
- * corrects what physically left the store, which becomes the reconciliation baseline.
+ * DP-04 · Loading confirmation. The required quantity per product is derived from vehicle-stock's
+ * `waitingOrders` — the backend's authoritative list of this driver's ASSIGNED orders not yet covered
+ * by on-board stock (GET /api/delivery/vehicle-stock). The DP-05 stop LIST carries no line items
+ * (only the DP-06 stop detail does), so aggregating stops here always yielded nothing. The driver
+ * confirms or corrects what physically left the store, which becomes the reconciliation baseline.
  */
 class LoadOutViewModel(
     private val driver: DriverRepository,
@@ -52,20 +54,20 @@ class LoadOutViewModel(
     fun load() {
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
-            when (val r = driver.stops()) {
+            when (val r = driver.vehicleStock()) {
                 is ApiResult.Success -> {
+                    // Product names live on the stock `lines`; waitingOrders carry only ids + quantities.
+                    val names = r.data.lines.associate { it.productId to it.productName }
                     val required = LinkedHashMap<Int, LoadOutRow>()
-                    r.data.forEach { stop ->
-                        stop.items?.forEach { item ->
-                            val existing = required[item.productId]
-                            val qty = (existing?.required ?: 0) + item.quantity
-                            required[item.productId] = LoadOutRow(
-                                productId = item.productId,
-                                productName = item.productName ?: "Product ${item.productId}",
-                                required = qty,
-                                loaded = qty,
-                            )
-                        }
+                    r.data.waitingOrders.forEach { w ->
+                        val existing = required[w.productId]
+                        val qty = (existing?.required ?: 0) + w.quantity
+                        required[w.productId] = LoadOutRow(
+                            productId = w.productId,
+                            productName = names[w.productId] ?: "Product ${w.productId}",
+                            required = qty,
+                            loaded = qty,
+                        )
                     }
                     _state.update { it.copy(loading = false, rows = required.values.toList()) }
                 }

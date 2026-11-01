@@ -112,7 +112,7 @@ private fun ColumnScope.ExecutionStep(vm: DeliveryViewModel, state: DeliveryStat
         PpCard(background = PpColor.Canvas, border = PpColor.Line) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Products (est.)", style = PpType.body.copy(color = PpColor.Ink700))
-                Text(money(state.productsSubtotal), style = PpType.mono)
+                Text(money(state.collectAtDoorEstimate), style = PpType.mono)
             }
             Spacer(Modifier.height(4.dp))
             Text("Deposits, floor charge and any wallet credit are added when you confirm.", style = PpType.bodySm.copy(color = PpColor.Ink500))
@@ -131,7 +131,7 @@ private fun ColumnScope.PaymentStep(vm: DeliveryViewModel, state: DeliveryState,
     Column(Modifier.fillMaxWidth().background(PpColor.Ink900).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         SectionLabel(if (state.isPostpaid) "Ledger to account" else "Collect from ${state.stop?.receiverName ?: "customer"}", color = PpColor.BrandOnDark)
         Spacer(Modifier.height(8.dp))
-        Text(money(state.productsSubtotal), style = PpType.amountXl.copy(color = PpColor.White))
+        Text(money(state.collectAtDoorEstimate), style = PpType.amountXl.copy(color = PpColor.White))
         Text("estimate · final on confirm", style = PpType.bodySm.copy(color = PpColor.BrandOnDark))
     }
     Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
@@ -158,7 +158,7 @@ private fun ColumnScope.PaymentStep(vm: DeliveryViewModel, state: DeliveryState,
 @Composable
 private fun ColumnScope.PreviewStep(vm: DeliveryViewModel, state: DeliveryState) {
     val p = state.preview
-    val payable = p?.amountPayable ?: state.productsSubtotal
+    val payable = p?.amountPayable ?: state.collectAtDoorEstimate
     Column(Modifier.fillMaxWidth().background(PpColor.Ink900).padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         SectionLabel(if (state.isPostpaid) "Ledger to account" else "Collect from ${state.stop?.receiverName ?: "customer"}", color = PpColor.BrandOnDark)
         Spacer(Modifier.height(8.dp))
@@ -199,7 +199,7 @@ private fun ColumnScope.DoneStep(state: DeliveryState, onDone: () -> Unit) {
     val offline = state.queuedOffline
     Column(Modifier.fillMaxWidth().background(if (offline) PpColor.Pending else PpColor.Success).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(if (offline) "Delivered — payment pending" else "Stop complete", style = PpType.screenTitle.copy(color = PpColor.White))
-        val amt = state.result?.amountPayable ?: state.productsSubtotal
+        val amt = state.result?.amountPayable ?: state.collectAtDoorEstimate
         Text(
             if (offline) "Saved on this phone. It will sync automatically when signal returns."
             else "${state.stop?.receiverName ?: ""} · ${money(amt)} ${if (state.isPostpaid) "ledgered" else "collected"}",
@@ -221,7 +221,7 @@ private fun ColumnScope.DoneStep(state: DeliveryState, onDone: () -> Unit) {
         }
     }
     Column(Modifier.fillMaxWidth().background(PpColor.Canvas).padding(16.dp)) {
-        PrimaryButton("Continue to next stop", onClick = onDone)
+        PrimaryButton("Continue", onClick = onDone)
     }
 }
 

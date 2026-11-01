@@ -57,6 +57,7 @@ fun ProfileScreen(
     onOpenHistory: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenBulk: () -> Unit,
+    onOpenVehicleStock: () -> Unit,
     onLogout: () -> Unit,
     viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.Factory),
 ) {
@@ -92,6 +93,8 @@ fun ProfileScreen(
                 LinkRow("Attendance", onOpenAttendance)
                 Divider()
                 LinkRow("Delivery history", onOpenHistory)
+                Divider()
+                LinkRow("Vehicle stock", onOpenVehicleStock)
                 Divider()
                 LinkRow("Bulk / event jobs", onOpenBulk)
             }
