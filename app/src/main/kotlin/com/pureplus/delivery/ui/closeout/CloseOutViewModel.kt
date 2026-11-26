@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 /** One editable can-reconciliation row (prefilled from the load-out baseline). */
 data class CanRow(
     val productId: Int,
+    val productName: String?,
     val loadedOut: Int,
     val delivered: Int,
     val fullsReturned: Int,
@@ -39,11 +40,13 @@ data class CanReturnState(
     val loading: Boolean = true,
     val sessionId: Long = -1,
     val rows: List<CanRow> = emptyList(),
+    val loadOutNote: String? = null,
     val submitting: Boolean = false,
     val done: Boolean = false,
     val error: String? = null,
 ) {
     val unaccounted: Int get() = rows.sumOf { it.variance.coerceAtLeast(0) }
+    val hasLoadOut: Boolean get() = rows.isNotEmpty() || sessionId > 0
 }
 
 class CanReturnViewModel(private val recon: ReconciliationRepository) : ViewModel() {
@@ -56,11 +59,21 @@ class CanReturnViewModel(private val recon: ReconciliationRepository) : ViewMode
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
             when (val r = recon.openSession()) {
-                is ApiResult.Success -> _state.update { it.copy(loading = false, sessionId = r.data.id.toLong(), rows = r.data.toRows()) }
+                is ApiResult.Success -> _state.update {
+                    it.copy(
+                        loading = false,
+                        sessionId = r.data.id.toLong(),
+                        rows = r.data.toRows(),
+                        loadOutNote = r.data.loadOutNote,
+                    )
+                }
                 is ApiResult.Failure -> _state.update { it.copy(loading = false, error = r.message) }
             }
         }
     }
+
+    /** Retry opening/reloading the session — useful when a previous attempt failed or when load-out just finished. */
+    fun retry() = open()
 
     fun setEmpties(productId: Int, v: Int) = edit(productId) { it.copy(emptiesCollected = v.coerceAtLeast(0)) }
     fun setFullsReturned(productId: Int, v: Int) = edit(productId) { it.copy(fullsReturned = v.coerceAtLeast(0)) }
@@ -85,7 +98,7 @@ class CanReturnViewModel(private val recon: ReconciliationRepository) : ViewMode
     }
 
     private fun ReconciliationSession.toRows() = lines.map {
-        CanRow(it.productId, it.loadedOut, it.delivered, it.fullsReturned, it.emptiesCollected, it.breakageLoss)
+        CanRow(it.productId, it.productName, it.loadedOut, it.delivered, it.fullsReturned, it.emptiesCollected, it.breakageLoss)
     }
 
     companion object {
@@ -247,18 +260,30 @@ data class CheckOutState(
     val session: ReconciliationSession? = null,
     val directMode: Boolean = false,
     val completedToday: Int = 0,
+    /** Orders still ASSIGNED / out-for-delivery (not yet delivered). Blocks clock-out per business rule X3. */
+    val pendingStops: Int = 0,
     /** The resolved shift state (drives the banner/actions). */
     val shiftState: ShiftState? = null,
     val submitting: Boolean = false,
     /** A reversible "end shift" is in flight (distinct from the terminal clock-out). */
     val ending: Boolean = false,
+    /** Legacy: reconciliation already closed — a retry (after a clock-out failure) must skip re-closing it. */
+    val reconClosed: Boolean = false,
     val done: Boolean = false,
     val error: String? = null,
 ) {
-    /** Direct end-shift is only safe when the driver hasn't delivered anything today. */
-    val canEndDirect: Boolean get() = directMode && completedToday == 0
-    /** They ran a route → must reconcile, not slip out via the attendance-only path. */
+    /**
+     * Direct end-shift is clean ONLY when nothing was delivered today AND no orders are still held
+     * (business rule V5: nothing to reconcile → frictionless clock-out; X3: no active orders remain).
+     */
+    val canEndDirect: Boolean get() = directMode && completedToday == 0 && pendingStops == 0
+    /** They delivered today → must reconcile (close-out), not slip out via the attendance-only path. */
     val blockedByActivity: Boolean get() = directMode && completedToday > 0
+    /**
+     * Nothing delivered, but orders are still ASSIGNED to the driver → can't clock out (X3). The store must
+     * reassign them (M2) or the driver must deliver them first. There is no in-app self-service for this.
+     */
+    val blockedByAssigned: Boolean get() = directMode && completedToday == 0 && pendingStops > 0
 }
 
 /**
@@ -295,12 +320,15 @@ class CheckOutViewModel(
             val shiftState = (shiftLifecycle.currentState() as? ApiResult.Success)?.data
 
             if (direct) {
-                val completed = (driver.routeSummary() as? ApiResult.Success)?.data?.stopsCompletedToday ?: 0
+                // Both numbers decide whether a direct end is clean: delivered (needs reconcile) + still-held
+                // (blocks clock-out). One fetch gives both.
+                val summary = (driver.routeSummary() as? ApiResult.Success)?.data
                 _state.update {
                     it.copy(
                         loading = false,
                         directMode = true,
-                        completedToday = completed,
+                        completedToday = summary?.stopsCompletedToday ?: 0,
+                        pendingStops = summary?.stopsPending ?: 0,
                         shiftState = shiftState,
                         phase = phaseFor(shiftState, session = null),
                     )
@@ -368,13 +396,20 @@ class CheckOutViewModel(
                     is ApiResult.Failure -> _state.update { it.copy(submitting = false, error = r.message) }
                 }
             } else if (_state.value.phase == CheckOutPhase.LegacyClose) {
-                // Legacy: close the reconciliation (both-loops gate) then stamp attendance.
-                when (val r = recon.close(sessionId!!, "Closed from driver app")) {
-                    is ApiResult.Success -> {
-                        shiftLifecycle.clockOut() // attendance close; best-effort
-                        _state.update { it.copy(submitting = false, done = true) }
+                // Legacy: close the reconciliation (both-loops gate) then stamp attendance. On a retry after a
+                // clock-out failure the recon is already CLOSED — skip re-closing it and only redo the clock-out.
+                val reconOk = if (_state.value.reconClosed) true
+                    else when (val r = recon.close(sessionId!!, "Closed from driver app")) {
+                        is ApiResult.Success -> { _state.update { it.copy(reconClosed = true) }; true }
+                        is ApiResult.Failure -> { _state.update { it.copy(submitting = false, error = r.message) }; false }
                     }
-                    is ApiResult.Failure -> _state.update { it.copy(submitting = false, error = r.message) }
+                if (reconOk) when (val co = shiftLifecycle.clockOut()) {
+                    // Surface an attendance clock-out failure instead of leaving the shift silently open.
+                    is ApiResult.Success -> _state.update { it.copy(submitting = false, done = true) }
+                    is ApiResult.Failure -> _state.update {
+                        it.copy(submitting = false,
+                            error = "Reconciliation closed, but clock-out failed: ${co.message}. Tap Check out to retry.")
+                    }
                 }
             } else {
                 // ShiftV2 PENDING_RECON → clock out (gate owned by the server; message surfaced verbatim).

@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 data class LoadOutRow(
     val productId: Int,
     val productName: String,
+    val uom: String?,
     val required: Int,
     val loaded: Int,
 ) {
@@ -56,15 +57,20 @@ class LoadOutViewModel(
             _state.update { it.copy(loading = true, error = null) }
             when (val r = driver.vehicleStock()) {
                 is ApiResult.Success -> {
-                    // Product names live on the stock `lines`; waitingOrders carry only ids + quantities.
+                    // waitingOrders now carry productName + uom (backend JOINs product_master). Fall back to
+                    // the on-board stock `lines`, then a bare id, only if a name is somehow missing.
                     val names = r.data.lines.associate { it.productId to it.productName }
                     val required = LinkedHashMap<Int, LoadOutRow>()
                     r.data.waitingOrders.forEach { w ->
                         val existing = required[w.productId]
                         val qty = (existing?.required ?: 0) + w.quantity
+                        val name = w.productName?.takeIf { it.isNotBlank() }
+                            ?: names[w.productId]?.takeIf { it.isNotBlank() }
+                            ?: "Product ${w.productId}"
                         required[w.productId] = LoadOutRow(
                             productId = w.productId,
-                            productName = names[w.productId] ?: "Product ${w.productId}",
+                            productName = name,
+                            uom = existing?.uom ?: w.uom,
                             required = qty,
                             loaded = qty,
                         )

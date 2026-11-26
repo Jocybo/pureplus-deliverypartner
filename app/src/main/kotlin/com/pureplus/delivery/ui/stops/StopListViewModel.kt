@@ -11,6 +11,7 @@ import com.pureplus.delivery.di.Deps
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 enum class StopFilter(val label: String) { All("All"), Pending("Pending"), Postpaid("Postpaid"), Failed("Failed") }
@@ -36,7 +37,19 @@ class StopListViewModel(private val driver: DriverRepository) : ViewModel() {
     private val _state = MutableStateFlow(StopListState())
     val state = _state.asStateFlow()
 
-    init { load() }
+    init {
+        load()
+        viewModelScope.launch {
+            while (true) {
+                delay(30_000L)
+                // silent poll — update data without touching loading/refreshing flags
+                when (val r = driver.stops()) {
+                    is ApiResult.Success -> _state.update { it.copy(all = r.data) }
+                    is ApiResult.Failure -> { /* silent — don't overwrite existing data on poll error */ }
+                }
+            }
+        }
+    }
 
     /** First load — full-screen loader. */
     fun load() = fetch(initial = true)

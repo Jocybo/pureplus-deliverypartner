@@ -202,7 +202,11 @@ fun AppNavGraph(navController: NavHostController = rememberNavController()) {
 
         // ── Close out ────────────────────────────────────────────────────────
         composable(Routes.CAN_RETURN) {
-            CanReturnScreen(onNext = { sessionId -> navController.navigate(Routes.cash(sessionId)) })
+            CanReturnScreen(
+                onNext = { sessionId -> navController.navigate(Routes.cash(sessionId)) },
+                // No load-out recorded → the driver can't reconcile/close; send them to DP-04 to load out.
+                onLoadOut = { navController.navigate(Routes.LOAD_OUT) },
+            )
         }
         composable(Routes.CASH, arguments = listOf(navArgument("sessionId") { type = NavType.LongType })) { entry ->
             val sessionId = entry.arguments?.getLong("sessionId") ?: return@composable

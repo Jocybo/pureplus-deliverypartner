@@ -69,6 +69,10 @@ fun CheckOutScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.loading -> LoadingState()
+                // Load failed before any phase resolved — show the error cleanly (the Retry button is below).
+                state.phase == CheckOutPhase.Loading && state.error != null -> Column(
+                    Modifier.fillMaxSize().padding(16.dp),
+                ) { NotePanel(state.error!!, tone = Tone.Danger) }
                 state.phase == CheckOutPhase.Completed -> CompletedBody(state)
                 state.phase == CheckOutPhase.PendingRecon -> PendingReconBody(state)
                 state.directMode -> DirectBody(state)
@@ -94,10 +98,18 @@ fun CheckOutScreen(
                 }
 
                 CheckOutPhase.EndShift -> when {
+                    // Clean mistaken check-in (nothing delivered, nothing assigned) → terminal clock-out in
+                    // ONE tap (business rule V5: nothing to reconcile → frictionless). checkOut() in direct
+                    // mode calls clockOut() straight away; no PENDING_RECON detour.
                     state.directMode && state.canEndDirect ->
-                        PrimaryButton("End shift", onClick = viewModel::endShift, loading = state.ending, container = PpColor.Ink900, height = 62)
+                        PrimaryButton("End shift & clock out", onClick = viewModel::checkOut, loading = state.submitting, container = PpColor.Ink900, height = 62)
                     state.directMode && state.blockedByActivity ->
                         OutlineButton("Go to close-out", onClick = onGoCloseOut)
+                    // Orders still assigned but nothing delivered — can't clock out (X3). Only a re-check helps
+                    // (after the store reassigns them, M2); no attendance-only escape while holding orders.
+                    state.directMode && state.blockedByAssigned ->
+                        OutlineButton("Refresh", onClick = viewModel::load)
+                    // Real shift (ShiftV2 ACTIVE) → end duty first (ACTIVE → PENDING_RECON), then reconcile + clock out.
                     else ->
                         PrimaryButton("End shift", onClick = viewModel::endShift, loading = state.ending, container = PpColor.Ink900, height = 62)
                 }
@@ -112,7 +124,9 @@ fun CheckOutScreen(
                         height = 62,
                     )
 
-                CheckOutPhase.Loading -> Unit
+                // Load failed (phase never advanced past Loading) — offer a retry instead of a dead-end.
+                CheckOutPhase.Loading ->
+                    if (state.error != null) OutlineButton("Retry", onClick = viewModel::load)
             }
         }
     }
@@ -154,14 +168,20 @@ private fun PendingReconBody(state: CheckOutState) {
 @Composable
 private fun DirectBody(state: CheckOutState) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (state.blockedByActivity) {
-            NotePanel(
+        when {
+            state.blockedByActivity -> NotePanel(
                 "You've completed ${state.completedToday} deliver${if (state.completedToday == 1) "y" else "ies"} today. " +
                     "Company cash and cans must be reconciled before you can check out — please close out.",
                 tone = Tone.Danger,
             )
-        } else {
-            NotePanel(
+            // Nothing delivered, but orders are still assigned to you → can't clock out while holding orders.
+            state.blockedByAssigned -> NotePanel(
+                "You still have ${state.pendingStops} order${if (state.pendingStops == 1) "" else "s"} assigned to you. " +
+                    "You can't end your shift while holding orders — deliver them, or ask the store to reassign them, " +
+                    "then refresh.",
+                tone = Tone.Pending,
+            )
+            else -> NotePanel(
                 "You haven't started a run — nothing was loaded out, delivered, or collected. " +
                     "You can end this check-in now.",
                 tone = Tone.Info,

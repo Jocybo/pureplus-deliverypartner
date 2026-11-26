@@ -41,6 +41,8 @@ import com.pureplus.delivery.ui.theme.PpType
 import com.pureplus.delivery.util.dialPhone
 import com.pureplus.delivery.util.money
 import com.pureplus.delivery.util.openMaps
+import com.pureplus.delivery.util.shortDate
+import com.pureplus.delivery.util.timeOfDay
 
 /** DP-06 · Stop / order detail. DP-07 navigation is the "Navigate" hand-off to the device map app. */
 @Composable
@@ -83,8 +85,8 @@ fun StopDetailScreen(
             val label = when {
                 ofd && postpaid -> "Continue delivery · no cash"
                 ofd -> "Continue delivery"
-                postpaid -> "Start delivery · no cash"
-                else -> "Start delivery"
+                postpaid -> "Out for delivery · no cash"
+                else -> "Out for delivery"
             }
             // ASSIGNED → move OUT_FOR_DELIVERY first, then open the door flow (onDeliver); already-OFD skips straight through.
             PrimaryButton(label, onClick = { viewModel.startDelivery(onReady = onDeliver) }, loading = state.starting, height = 60)
@@ -122,6 +124,57 @@ private fun StopDetailBody(stop: Stop, context: android.content.Context) {
             }
         }
 
+        // ── Order info card ───────────────────────────────────────────────────
+        val hasOrderInfo = stop.orderDate != null || stop.isCarriedOver || stop.isOverdue
+                || stop.expectedDeliveryTime != null || stop.slotLabel != null
+        if (hasOrderInfo) {
+            PpCard {
+                SectionLabel("Order")
+                Spacer(Modifier.height(9.dp))
+
+                // Urgency banners — shown at the top so the driver sees them immediately.
+                if (stop.isCarriedOver) {
+                    NotePanel(
+                        "Carried over from a previous day — deliver first",
+                        tone = Tone.Pending,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                if (stop.isOverdue) {
+                    NotePanel("Past expected delivery time", tone = Tone.Danger)
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                // Placed time
+                stop.orderDate?.let { date ->
+                    LabeledRow(
+                        "Placed",
+                        if (stop.isCarriedOver) shortDate(date) else timeOfDay(date),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                // Expected / slot
+                val expectedLabel: String? = when {
+                    stop.orderType.equals("SCHEDULED", ignoreCase = true) && stop.slotLabel != null ->
+                        stop.slotLabel
+                    stop.expectedDeliveryTime != null ->
+                        timeOfDay(stop.expectedDeliveryTime)
+                    else -> null
+                }
+                expectedLabel?.let {
+                    LabeledRow("Expected", it)
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                // Order type
+                LabeledRow(
+                    "Type",
+                    if (stop.orderType.equals("SCHEDULED", ignoreCase = true)) "Scheduled" else "Instant",
+                )
+            }
+        }
+
         // Customer location on an OpenStreetMap map (shown only when the stop has coordinates).
         if (stop.latitude != null && stop.longitude != null) {
             StopsMap(
@@ -135,7 +188,7 @@ private fun StopDetailBody(stop: Stop, context: android.content.Context) {
                 SectionLabel("Items")
                 Spacer(Modifier.height(10.dp))
                 stop.items.forEach { item ->
-                    LabeledRow(item.productName ?: "Product ${item.productId}", "× ${item.quantity}")
+                    LabeledRow(item.productName ?: "Product ${item.productId}", "${item.quantity} cans")
                     Spacer(Modifier.height(8.dp))
                 }
             }

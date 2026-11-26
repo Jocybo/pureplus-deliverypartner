@@ -156,6 +156,19 @@ data class Stop(
     val roadKm: Double? = null,
     /** present on the DP-06 detail response only. */
     val items: List<StopItem>? = null,
+    // ── Delivery priority (DP-05 priority fields) ──────────────────────────────
+    /** ISO-8601 timestamp when the customer placed the order. */
+    val orderDate: String? = null,
+    /** "INSTANT" | "SCHEDULED" — how the customer expressed their delivery time. */
+    val orderType: String = "INSTANT",
+    /** Slot window label for a scheduled order (e.g. "2:00 PM – 4:00 PM"); null for instant. */
+    val slotLabel: String? = null,
+    /** Placed on a previous day and still not delivered — carry-over, deliver first. */
+    val isCarriedOver: Boolean = false,
+    /** Past its expected/promised delivery time (instant past SLA, or window closed). */
+    val isOverdue: Boolean = false,
+    /** 1 = overdue/carried-over · 2 = instant · 3 = scheduled. List is ordered by this. */
+    val priorityTier: Int = 2,
 )
 
 data class StopItem(
@@ -205,6 +218,7 @@ data class CloseSessionRequest(val closeNote: String? = null)
 
 data class CanLine(
     val productId: Int = 0,
+    val productName: String? = null,
     val loadedOut: Int = 0,
     val delivered: Int = 0,
     val fullsReturned: Int = 0,
@@ -234,6 +248,7 @@ data class ReconciliationSession(
     val loadOutAt: String? = null,
     val closedAt: String? = null,
     val closeNote: String? = null,
+    val loadOutNote: String? = null,
     val lines: List<CanLine> = emptyList(),
     val allBalanced: Boolean = false,
     val cash: CashSummary? = null,
@@ -538,6 +553,8 @@ data class VehicleStockLine(
 data class WaitingOrderLine(
     val orderId: Int = 0,
     val productId: Int = 0,
+    val productName: String? = null,
+    val uom: String? = null,
     val quantity: Int = 0,
     val free: Int = 0,
     val shortfall: Int = 0,
